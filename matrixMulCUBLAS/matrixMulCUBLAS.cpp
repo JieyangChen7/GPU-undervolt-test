@@ -278,7 +278,7 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
     printf("Computing result using CUBLAS...");
 
     // execute the kernel
-    int nIter = 30;
+    int nIter = 10;
 
     // CUBLAS version 2.0
     {
