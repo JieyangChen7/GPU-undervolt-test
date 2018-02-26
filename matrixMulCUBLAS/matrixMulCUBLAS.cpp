@@ -278,7 +278,7 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
     printf("Computing result using CUBLAS...");
 
     // execute the kernel
-    int nIter = 3000;
+    int nIter = 30;
 
     // CUBLAS version 2.0
     {
@@ -397,6 +397,12 @@ void undervolte()
     }
     cout << "GPU " << i << " power limit: " << power_limit << "mW" <<endl;
 
+    result = nvmlDeviceSetApplicationsClocks ( device, 2505, 875 );
+    if (NVML_SUCCESS != result)
+    {
+      printf("Failed to set clock of device %i: %s\n", i, nvmlErrorString(result));
+      return;
+    }
 
 }
 
