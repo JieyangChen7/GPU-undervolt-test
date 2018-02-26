@@ -397,7 +397,7 @@ void undervolte()
     }
     cout << "GPU " << i << " power limit: " << power_limit << "mW" <<endl;
 
-    result = nvmlDeviceSetApplicationsClocks ( device, 2505, 875 );
+    //result = nvmlDeviceSetApplicationsClocks ( device, 2505, 875 );
     if (NVML_SUCCESS != result)
     {
       printf("Failed to set clock of device %i: %s\n", i, nvmlErrorString(result));
