@@ -76,300 +76,6 @@ typedef struct _matrixSize      // Optional Command-line multiplier for matrix s
     unsigned int uiWA, uiHA, uiWB, uiHB, uiWC, uiHC;
 } sMatrixSize;
 
-////////////////////////////////////////////////////////////////////////////////
-//! Compute reference data set matrix multiply on CPU
-//! C = A * B
-//! @param C          reference data, computed but preallocated
-//! @param A          matrix A as provided to device
-//! @param B          matrix B as provided to device
-//! @param hA         height of matrix A
-//! @param wB         width of matrix B
-////////////////////////////////////////////////////////////////////////////////
-void
-matrixMulCPU(float *C, const float *A, const float *B, unsigned int hA, unsigned int wA, unsigned int wB)
-{
-    for (unsigned int i = 0; i < hA; ++i)
-        for (unsigned int j = 0; j < wB; ++j)
-        {
-            double sum = 0;
-
-            for (unsigned int k = 0; k < wA; ++k)
-            {
-                double a = A[i * wA + k];
-                double b = B[k * wB + j];
-                sum += a * b;
-            }
-
-            C[i * wB + j] = (float)sum;
-        }
-}
-
-// Allocates a matrix with random float entries.
-void randomInit(float *data, int size)
-{
-    for (int i = 0; i < size; ++i)
-        data[i] = rand() / (float)RAND_MAX;
-}
-
-void printDiff(float *data1, float *data2, int width, int height, int iListLength, float fListTol)
-{
-    printf("Listing first %d Differences > %.6f...\n", iListLength, fListTol);
-    int i,j,k;
-    int error_count=0;
-
-    for (j = 0; j < height; j++)
-    {
-        if (error_count < iListLength)
-        {
-            printf("\n  Row %d:\n", j);
-        }
-
-        for (i = 0; i < width; i++)
-        {
-            k = j * width + i;
-            float fDiff = fabs(data1[k] - data2[k]);
-
-            if (fDiff > fListTol)
-            {
-                if (error_count < iListLength)
-                {
-                    printf("    Loc(%d,%d)\tCPU=%.5f\tGPU=%.5f\tDiff=%.6f\n", i, j, data1[k], data2[k], fDiff);
-                }
-
-                error_count++;
-            }
-        }
-    }
-
-    printf(" \n  Total Errors = %d\n", error_count);
-}
-
-void initializeCUDA(int argc, char **argv, int &devID, int &iSizeMultiple, sMatrixSize &matrix_size)
-{
-    // By default, we use device 0, otherwise we override the device ID based on what is provided at the command line
-    cudaError_t error;
-    devID = 0;
-
-    if (checkCmdLineFlag(argc, (const char **)argv, "device"))
-    {
-        devID = getCmdLineArgumentInt(argc, (const char **)argv, "device");
-        error = cudaSetDevice(devID);
-
-        if (error != cudaSuccess)
-        {
-            printf("cudaSetDevice returned error code %d, line(%d)\n", error, __LINE__);
-            exit(EXIT_FAILURE);
-        }
-    }
-
-    // get number of SMs on this GPU
-    error = cudaGetDevice(&devID);
-
-    if (error != cudaSuccess)
-    {
-        printf("cudaGetDevice returned error code %d, line(%d)\n", error, __LINE__);
-        exit(EXIT_FAILURE);
-    }
-
-
-    if (checkCmdLineFlag(argc, (const char **)argv, "sizemult"))
-    {
-        iSizeMultiple = getCmdLineArgumentInt(argc, (const char **)argv, "sizemult");
-    }
-
-    iSizeMultiple = min(iSizeMultiple, 10);
-    iSizeMultiple = max(iSizeMultiple, 1);
-
-    cudaDeviceProp deviceProp;
-
-    error = cudaGetDeviceProperties(&deviceProp, devID);
-
-    if (error != cudaSuccess)
-    {
-        printf("cudaGetDeviceProperties returned error code %d, line(%d)\n", error, __LINE__);
-        exit(EXIT_FAILURE);
-    }
-
-    printf("GPU Device %d: \"%s\" with compute capability %d.%d\n\n", devID, deviceProp.name, deviceProp.major, deviceProp.minor);
-
-    // use a larger block size for Fermi and above
-    int block_size = (deviceProp.major < 2) ? 16 : 32;
-
-    // matrix_size.uiWA = 3 * block_size * iSizeMultiple;
-    // matrix_size.uiHA = 4 * block_size * iSizeMultiple;
-    // matrix_size.uiWB = 2 * block_size * iSizeMultiple;
-    // matrix_size.uiHB = 3 * block_size * iSizeMultiple;
-    // matrix_size.uiWC = 2 * block_size * iSizeMultiple;
-    // matrix_size.uiHC = 4 * block_size * iSizeMultiple;
-
-    int n = 2048;
-
-    matrix_size.uiWA = n;
-    matrix_size.uiHA = n;
-    matrix_size.uiWB = n;
-    matrix_size.uiHB = n;
-    matrix_size.uiWC = n;
-    matrix_size.uiHC = n;
-
-    printf("MatrixA(%u,%u), MatrixB(%u,%u), MatrixC(%u,%u)\n",
-           matrix_size.uiHA, matrix_size.uiWA,
-           matrix_size.uiHB, matrix_size.uiWB,
-           matrix_size.uiHC, matrix_size.uiWC);
-
-    if( matrix_size.uiWA != matrix_size.uiHB ||
-        matrix_size.uiHA != matrix_size.uiHC ||
-        matrix_size.uiWB != matrix_size.uiWC)
-    {
-       printf("ERROR: Matrix sizes do not match!\n");
-       exit(-1);
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//! Run a simple test matrix multiply using CUBLAS
-////////////////////////////////////////////////////////////////////////////////
-int matrixMultiply()
-{
-    
-    // allocate host memory for matrices A and B
-    unsigned int size_A = matrix_size.uiWA * matrix_size.uiHA;
-    unsigned int mem_size_A = sizeof(float) * size_A;
-    float *h_A = (float *)malloc(mem_size_A);
-
-    unsigned int size_B = matrix_size.uiWB * matrix_size.uiHB;
-    unsigned int mem_size_B = sizeof(float) * size_B;
-    float *h_B = (float *)malloc(mem_size_B);
-
-    unsigned int size_C = matrix_size.uiWC * matrix_size.uiHC;
-    unsigned int mem_size_C = sizeof(float) * size_C;
-    float *h_C      = (float *) malloc(mem_size_C);
-    float *h_C2      = (float *) malloc(mem_size_C);
-
-    float *d_A, *d_B, *d_C, *d_C2;
-    checkCudaErrors(cudaMalloc((void **) &d_A, mem_size_A));
-    checkCudaErrors(cudaMalloc((void **) &d_B, mem_size_B));
-    checkCudaErrors(cudaMalloc((void **) &d_C, mem_size_C));
-    checkCudaErrors(cudaMalloc((void **) &d_C2, mem_size_C));
-
-    // set seed for rand()
-    srand(2006);
-
-    // initialize host memory
-    randomInit(h_A, size_A);
-    randomInit(h_B, size_B);
-    checkCudaErrors(cudaMemcpy(d_A, h_A, mem_size_A, cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemcpy(d_B, h_B, mem_size_B, cudaMemcpyHostToDevice));
-
-    const float alpha = 1.0f;
-    const float beta  = 0.0f;
-    cublasHandle_t handle;
-    cudaEvent_t start, stop;
-    checkCudaErrors(cudaEventCreate(&start));
-    checkCudaErrors(cudaEventCreate(&stop));
-
-    checkCudaErrors(cublasCreate(&handle));
-
-
-    printf("Computing result using CUBLAS (normal power)...\n");
-    checkCudaErrors(cublasSgemm(handle, 
-                                CUBLAS_OP_N, CUBLAS_OP_N, 
-                                matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, 
-                                &alpha, 
-                                d_B, matrix_size.uiWB, 
-                                d_A, matrix_size.uiWA, 
-                                &beta, 
-                                d_C2, matrix_size.uiWB));
-    checkCudaErrors(cudaMemcpy(h_C2, d_C2, mem_size_C, cudaMemcpyDeviceToHost));
-
-   
-    // create and start timer
-    printf("Computing result using CUBLAS (low power)...\n");
-
-    // execute the kernel
-    int nIter = 30;
-
-    // Record the start event
-    //checkCudaErrors(cudaEventRecord(start, NULL));
-
-    for (int j = 0; j < nIter; j++)
-    {
-        //note cublas is column primary!
-        //need to transpose the order
-        checkCudaErrors(cublasSgemm(handle, 
-                                    CUBLAS_OP_N, CUBLAS_OP_N, 
-                                    matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, 
-                                    &alpha, 
-                                    d_B, matrix_size.uiWB, 
-                                    d_A, matrix_size.uiWA, 
-                                    &beta,
-                                    d_C, matrix_size.uiWB));
-        // copy result from device to host
-        checkCudaErrors(cudaMemcpy(h_C, d_C, mem_size_C, cudaMemcpyDeviceToHost));
-        // check result (CUBLAS)
-        bool resCUBLAS = sdkCompareL2fe(h_C2, h_C, size_C, 1.0e-6f);
-
-        if (resCUBLAS != true)
-        {
-            printDiff(reference, h_CUBLAS, matrix_size.uiWC, matrix_size.uiHC, 100, 1.0e-5f);
-        }
-
-        printf("Comparing CUBLAS Matrix Multiply with CPU results: %s\n", (true == resCUBLAS) ? "PASS" : "FAIL");
-
-    }
-
-        // printf("done.\n");
-
-        // // Record the stop event
-        // checkCudaErrors(cudaEventRecord(stop, NULL));
-
-        // // Wait for the stop event to complete
-        // checkCudaErrors(cudaEventSynchronize(stop));
-
-        // float msecTotal = 0.0f;
-        // checkCudaErrors(cudaEventElapsedTime(&msecTotal, start, stop));
-
-        // // Compute and print the performance
-        // float msecPerMatrixMul = msecTotal / nIter;
-        // double flopsPerMatrixMul = 2.0 * (double)matrix_size.uiHC * (double)matrix_size.uiWC * (double)matrix_size.uiHB;
-        // double gigaFlops = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul / 1000.0f);
-        // printf(
-        //     "Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops\n",
-        //     gigaFlops,
-        //     msecPerMatrixMul,
-        //     flopsPerMatrixMul);
-
-        // copy result from device to host
-        //checkCudaErrors(cudaMemcpy(h_CUBLAS, d_C, mem_size_C, cudaMemcpyDeviceToHost));
-
-        // Destroy the handle
-        checkCudaErrors(cublasDestroy(handle));
-    }
-
-    
-
-    
-
-    printf("\nNOTE: The CUDA Samples are not meant for performance measurements. Results may vary when GPU Boost is enabled.\n");
-
-    // clean up memory
-    free(h_A);
-    free(h_B);
-    free(h_C);
-    free(reference);
-    checkCudaErrors(cudaFree(d_A));
-    checkCudaErrors(cudaFree(d_B));
-    checkCudaErrors(cudaFree(d_C));
-
-    // if (resCUBLAS == true)
-    // {
-    //     return EXIT_SUCCESS;    // return value = 1
-    // }
-    // else
-    // {
-    //     return EXIT_FAILURE;     // return value = 0
-    // }
-    return 0;
-}
 
 void undervolte()
 {
@@ -453,6 +159,233 @@ void resetvolte()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+//! Compute reference data set matrix multiply on CPU
+//! C = A * B
+//! @param C          reference data, computed but preallocated
+//! @param A          matrix A as provided to device
+//! @param B          matrix B as provided to device
+//! @param hA         height of matrix A
+//! @param wB         width of matrix B
+////////////////////////////////////////////////////////////////////////////////
+void
+matrixMulCPU(float *C, const float *A, const float *B, unsigned int hA, unsigned int wA, unsigned int wB)
+{
+    for (unsigned int i = 0; i < hA; ++i)
+        for (unsigned int j = 0; j < wB; ++j)
+        {
+            double sum = 0;
+
+            for (unsigned int k = 0; k < wA; ++k)
+            {
+                double a = A[i * wA + k];
+                double b = B[k * wB + j];
+                sum += a * b;
+            }
+
+            C[i * wB + j] = (float)sum;
+        }
+}
+
+// Allocates a matrix with random float entries.
+void randomInit(float *data, int size)
+{
+    for (int i = 0; i < size; ++i)
+        data[i] = rand() / (float)RAND_MAX;
+}
+
+void printDiff(float *data1, float *data2, int width, int height, int iListLength, float fListTol)
+{
+    printf("Listing first %d Differences > %.6f...\n", iListLength, fListTol);
+    int i,j,k;
+    int error_count=0;
+
+    for (j = 0; j < height; j++)
+    {
+        if (error_count < iListLength)
+        {
+            printf("\n  Row %d:\n", j);
+        }
+
+        for (i = 0; i < width; i++)
+        {
+            k = j * width + i;
+            float fDiff = fabs(data1[k] - data2[k]);
+
+            if (fDiff > fListTol)
+            {
+                if (error_count < iListLength)
+                {
+                    printf("    Loc(%d,%d)\tCPU=%.5f\tGPU=%.5f\tDiff=%.6f\n", i, j, data1[k], data2[k], fDiff);
+                }
+
+                error_count++;
+            }
+        }
+    }
+
+    printf(" \n  Total Errors = %d\n", error_count);
+}
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+//! Run a simple test matrix multiply using CUBLAS
+////////////////////////////////////////////////////////////////////////////////
+int matrixMultiply()
+{
+    sMatrixSize matrix_size;
+    int n = 2048;
+
+    matrix_size.uiWA = n;
+    matrix_size.uiHA = n;
+    matrix_size.uiWB = n;
+    matrix_size.uiHB = n;
+    matrix_size.uiWC = n;
+    matrix_size.uiHC = n;
+
+    // allocate host memory for matrices A and B
+    unsigned int size_A = matrix_size.uiWA * matrix_size.uiHA;
+    unsigned int mem_size_A = sizeof(float) * size_A;
+    float *h_A = (float *)malloc(mem_size_A);
+
+    unsigned int size_B = matrix_size.uiWB * matrix_size.uiHB;
+    unsigned int mem_size_B = sizeof(float) * size_B;
+    float *h_B = (float *)malloc(mem_size_B);
+
+    unsigned int size_C = matrix_size.uiWC * matrix_size.uiHC;
+    unsigned int mem_size_C = sizeof(float) * size_C;
+    float *h_C      = (float *) malloc(mem_size_C);
+    float *h_C2      = (float *) malloc(mem_size_C);
+
+    float *d_A, *d_B, *d_C, *d_C2;
+    checkCudaErrors(cudaMalloc((void **) &d_A, mem_size_A));
+    checkCudaErrors(cudaMalloc((void **) &d_B, mem_size_B));
+    checkCudaErrors(cudaMalloc((void **) &d_C, mem_size_C));
+    checkCudaErrors(cudaMalloc((void **) &d_C2, mem_size_C));
+
+    // set seed for rand()
+    srand(2006);
+
+    // initialize host memory
+    randomInit(h_A, size_A);
+    randomInit(h_B, size_B);
+    checkCudaErrors(cudaMemcpy(d_A, h_A, mem_size_A, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_B, h_B, mem_size_B, cudaMemcpyHostToDevice));
+
+    const float alpha = 1.0f;
+    const float beta  = 0.0f;
+    cublasHandle_t handle;
+    cudaEvent_t start, stop;
+    checkCudaErrors(cudaEventCreate(&start));
+    checkCudaErrors(cudaEventCreate(&stop));
+
+    checkCudaErrors(cublasCreate(&handle));
+
+
+    printf("Computing result using CUBLAS (normal power)...\n");
+    resetvolte();
+    checkCudaErrors(cublasSgemm(handle, 
+                                CUBLAS_OP_N, CUBLAS_OP_N, 
+                                matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, 
+                                &alpha, 
+                                d_B, matrix_size.uiWB, 
+                                d_A, matrix_size.uiWA, 
+                                &beta, 
+                                d_C2, matrix_size.uiWB));
+    checkCudaErrors(cudaMemcpy(h_C2, d_C2, mem_size_C, cudaMemcpyDeviceToHost));
+
+   
+    // create and start timer
+    printf("Computing result using CUBLAS (low power)...\n");
+    undervolte();
+    // execute the kernel
+    int nIter = 30;
+
+    // Record the start event
+    //checkCudaErrors(cudaEventRecord(start, NULL));
+
+    for (int j = 0; j < nIter; j++)
+    {
+        //note cublas is column primary!
+        //need to transpose the order
+        checkCudaErrors(cublasSgemm(handle, 
+                                    CUBLAS_OP_N, CUBLAS_OP_N, 
+                                    matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, 
+                                    &alpha, 
+                                    d_B, matrix_size.uiWB, 
+                                    d_A, matrix_size.uiWA, 
+                                    &beta,
+                                    d_C, matrix_size.uiWB));
+        // copy result from device to host
+        checkCudaErrors(cudaMemcpy(h_C, d_C, mem_size_C, cudaMemcpyDeviceToHost));
+        // check result (CUBLAS)
+        bool resCUBLAS = sdkCompareL2fe(h_C2, h_C, size_C, 1.0e-6f);
+
+        if (resCUBLAS != true)
+        {
+            printDiff(reference, h_CUBLAS, matrix_size.uiWC, matrix_size.uiHC, 100, 1.0e-5f);
+        }
+
+        printf("Comparing CUBLAS Matrix Multiply with CPU results: %s\n", (true == resCUBLAS) ? "PASS" : "FAIL");
+
+    }
+
+        // printf("done.\n");
+
+        // // Record the stop event
+        // checkCudaErrors(cudaEventRecord(stop, NULL));
+
+        // // Wait for the stop event to complete
+        // checkCudaErrors(cudaEventSynchronize(stop));
+
+        // float msecTotal = 0.0f;
+        // checkCudaErrors(cudaEventElapsedTime(&msecTotal, start, stop));
+
+        // // Compute and print the performance
+        // float msecPerMatrixMul = msecTotal / nIter;
+        // double flopsPerMatrixMul = 2.0 * (double)matrix_size.uiHC * (double)matrix_size.uiWC * (double)matrix_size.uiHB;
+        // double gigaFlops = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul / 1000.0f);
+        // printf(
+        //     "Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops\n",
+        //     gigaFlops,
+        //     msecPerMatrixMul,
+        //     flopsPerMatrixMul);
+
+        // copy result from device to host
+        //checkCudaErrors(cudaMemcpy(h_CUBLAS, d_C, mem_size_C, cudaMemcpyDeviceToHost));
+
+        // Destroy the handle
+        checkCudaErrors(cublasDestroy(handle));
+
+    
+
+    
+
+    printf("\nNOTE: The CUDA Samples are not meant for performance measurements. Results may vary when GPU Boost is enabled.\n");
+
+    // clean up memory
+    free(h_A);
+    free(h_B);
+    free(h_C);
+    free(reference);
+    checkCudaErrors(cudaFree(d_A));
+    checkCudaErrors(cudaFree(d_B));
+    checkCudaErrors(cudaFree(d_C));
+
+    // if (resCUBLAS == true)
+    // {
+    //     return EXIT_SUCCESS;    // return value = 1
+    // }
+    // else
+    // {
+    //     return EXIT_FAILURE;     // return value = 0
+    // }
+    return 0;
+}
+
+
+
+////////////////////////////////////////////////////////////////////////////////
 // Program main
 ////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char **argv)
@@ -462,11 +395,10 @@ int main(int argc, char **argv)
     int devID = 0, sizeMult = 5;
     sMatrixSize matrix_size;
 
-    initializeCUDA(argc, argv, devID, sizeMult, matrix_size);
 
-    undervolte();
+    
 
-    int matrix_result = matrixMultiply(argc, argv, devID, matrix_size);
-
+    int matrix_result = matrixMultiply();
+    resetvolte();
     return matrix_result;
 }
