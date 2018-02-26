@@ -234,7 +234,7 @@ void printDiff(float *data1, float *data2, int width, int height, int iListLengt
 int matrixMultiply()
 {
     sMatrixSize matrix_size;
-    int n = 2048;
+    int n = 10240;
 
     matrix_size.uiWA = n;
     matrix_size.uiHA = n;
