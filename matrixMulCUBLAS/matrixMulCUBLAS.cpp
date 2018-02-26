@@ -228,25 +228,28 @@ void initializeCUDA(int argc, char **argv, int &devID, int &iSizeMultiple, sMatr
 ////////////////////////////////////////////////////////////////////////////////
 //! Run a simple test matrix multiply using CUBLAS
 ////////////////////////////////////////////////////////////////////////////////
-int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
+int matrixMultiply()
 {
-    cudaDeviceProp deviceProp;
-
-    checkCudaErrors(cudaGetDeviceProperties(&deviceProp, devID));
-
-    // use a larger block size for Fermi and above
-    int block_size = (deviceProp.major < 2) ? 16 : 32;
-
-    // set seed for rand()
-    srand(2006);
-
+    
     // allocate host memory for matrices A and B
     unsigned int size_A = matrix_size.uiWA * matrix_size.uiHA;
     unsigned int mem_size_A = sizeof(float) * size_A;
     float *h_A = (float *)malloc(mem_size_A);
+
     unsigned int size_B = matrix_size.uiWB * matrix_size.uiHB;
     unsigned int mem_size_B = sizeof(float) * size_B;
     float *h_B = (float *)malloc(mem_size_B);
+
+    unsigned int size_C = matrix_size.uiWC * matrix_size.uiHC;
+    unsigned int mem_size_C = sizeof(float) * size_C;
+    float *h_C      = (float *) malloc(mem_size_C);
+    float *h_C2      = (float *) malloc(mem_size_C);
+
+    float *d_A, *d_B, *d_C, *d_C2;
+    checkCudaErrors(cudaMalloc((void **) &d_A, mem_size_A));
+    checkCudaErrors(cudaMalloc((void **) &d_B, mem_size_B));
+    checkCudaErrors(cudaMalloc((void **) &d_C, mem_size_C));
+    checkCudaErrors(cudaMalloc((void **) &d_C2, mem_size_C));
 
     // set seed for rand()
     srand(2006);
@@ -254,77 +257,65 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
     // initialize host memory
     randomInit(h_A, size_A);
     randomInit(h_B, size_B);
-
-    // allocate device memory
-    float *d_A, *d_B, *d_C;
-    unsigned int size_C = matrix_size.uiWC * matrix_size.uiHC;
-    unsigned int mem_size_C = sizeof(float) * size_C;
-
-    // allocate host memory for the result
-    float *h_C      = (float *) malloc(mem_size_C);
-    float *h_CUBLAS = (float *) malloc(mem_size_C);
-
-    checkCudaErrors(cudaMalloc((void **) &d_A, mem_size_A));
-    checkCudaErrors(cudaMalloc((void **) &d_B, mem_size_B));
     checkCudaErrors(cudaMemcpy(d_A, h_A, mem_size_A, cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpy(d_B, h_B, mem_size_B, cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMalloc((void **) &d_C, mem_size_C));
 
-    // setup execution parameters
-    dim3 threads(block_size, block_size);
-    dim3 grid(matrix_size.uiWC / threads.x, matrix_size.uiHC / threads.y);
+    const float alpha = 1.0f;
+    const float beta  = 0.0f;
+    cublasHandle_t handle;
+    cudaEvent_t start, stop;
+    checkCudaErrors(cudaEventCreate(&start));
+    checkCudaErrors(cudaEventCreate(&stop));
 
-    // compute reference solution
-    printf("Computing result using host CPU...");
-    float *reference = (float *)malloc(mem_size_C);
-    // matrixMulCPU(reference, h_A, h_B, matrix_size.uiHA, matrix_size.uiWA, matrix_size.uiWB);
-    printf("done.\n");
+    checkCudaErrors(cublasCreate(&handle));
 
+
+    printf("Computing result using CUBLAS (normal power)...\n");
+    checkCudaErrors(cublasSgemm(handle, 
+                                CUBLAS_OP_N, CUBLAS_OP_N, 
+                                matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, 
+                                &alpha, 
+                                d_B, matrix_size.uiWB, 
+                                d_A, matrix_size.uiWA, 
+                                &beta, 
+                                d_C2, matrix_size.uiWB));
+    checkCudaErrors(cudaMemcpy(h_C2, d_C2, mem_size_C, cudaMemcpyDeviceToHost));
+
+   
     // create and start timer
-    printf("Computing result using CUBLAS...\n");
+    printf("Computing result using CUBLAS (low power)...\n");
 
     // execute the kernel
     int nIter = 30;
 
-    // CUBLAS version 2.0
+    // Record the start event
+    //checkCudaErrors(cudaEventRecord(start, NULL));
+
+    for (int j = 0; j < nIter; j++)
     {
-        const float alpha = 1.0f;
-        const float beta  = 0.0f;
-        cublasHandle_t handle;
-        cudaEvent_t start, stop;
+        //note cublas is column primary!
+        //need to transpose the order
+        checkCudaErrors(cublasSgemm(handle, 
+                                    CUBLAS_OP_N, CUBLAS_OP_N, 
+                                    matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, 
+                                    &alpha, 
+                                    d_B, matrix_size.uiWB, 
+                                    d_A, matrix_size.uiWA, 
+                                    &beta,
+                                    d_C, matrix_size.uiWB));
+        // copy result from device to host
+        checkCudaErrors(cudaMemcpy(h_C, d_C, mem_size_C, cudaMemcpyDeviceToHost));
+        // check result (CUBLAS)
+        bool resCUBLAS = sdkCompareL2fe(h_C2, h_C, size_C, 1.0e-6f);
 
-        checkCudaErrors(cublasCreate(&handle));
-
-        //Perform warmup operation with cublas
-        checkCudaErrors(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, &alpha, d_B, matrix_size.uiWB, d_A, matrix_size.uiWA, &beta, d_C, matrix_size.uiWB));
-
-        // Allocate CUDA events that we'll use for timing
-        checkCudaErrors(cudaEventCreate(&start));
-        checkCudaErrors(cudaEventCreate(&stop));
-
-
-
-        // Record the start event
-        checkCudaErrors(cudaEventRecord(start, NULL));
-
-        for (int j = 0; j < nIter; j++)
+        if (resCUBLAS != true)
         {
-            //note cublas is column primary!
-            //need to transpose the order
-            checkCudaErrors(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, &alpha, d_B, matrix_size.uiWB, d_A, matrix_size.uiWA, &beta, d_C, matrix_size.uiWB));
-             // copy result from device to host
-            // checkCudaErrors(cudaMemcpy(h_CUBLAS, d_C, mem_size_C, cudaMemcpyDeviceToHost));
-            // // check result (CUBLAS)
-            // bool resCUBLAS = sdkCompareL2fe(reference, h_CUBLAS, size_C, 1.0e-6f);
-
-            // if (resCUBLAS != true)
-            // {
-            //     printDiff(reference, h_CUBLAS, matrix_size.uiWC, matrix_size.uiHC, 100, 1.0e-5f);
-            // }
-
-            // printf("Comparing CUBLAS Matrix Multiply with CPU results: %s\n", (true == resCUBLAS) ? "PASS" : "FAIL");
-
+            printDiff(reference, h_CUBLAS, matrix_size.uiWC, matrix_size.uiHC, 100, 1.0e-5f);
         }
+
+        printf("Comparing CUBLAS Matrix Multiply with CPU results: %s\n", (true == resCUBLAS) ? "PASS" : "FAIL");
+
+    }
 
         // printf("done.\n");
 
@@ -396,19 +387,66 @@ void undervolte()
       printf("Failed to get handle for device %i: %s\n", i, nvmlErrorString(result));
       return;
     }
-    unsigned int power_limit;
-    result = nvmlDeviceGetPowerManagementLimit ( device, &power_limit );
+
+    result = nvmlDeviceSetPowerManagementLimit (device, 100000);
     if (NVML_SUCCESS != result)
     {
-      printf("Failed to get power limit of device %i: %s\n", i, nvmlErrorString(result));
+      printf("Failed to set power limit of device %i: %s\n", i, nvmlErrorString(result));
       return;
     }
-    cout << "GPU " << i << " power limit: " << power_limit << "mW" <<endl;
 
     result = nvmlDeviceSetApplicationsClocks ( device, 2505, 875 );
     if (NVML_SUCCESS != result)
     {
       printf("Failed to set clock of device %i: %s\n", i, nvmlErrorString(result));
+      return;
+    }
+    nvmlEnableState_t set = 0;
+    result = nvmlDeviceSetAutoBoostedClocksEnabled(device, set);
+    if (NVML_SUCCESS != result)
+    {
+      printf("Failed to disable autoboost of device %i: %s\n", i, nvmlErrorString(result));
+      return;
+    }
+
+}
+
+void resetvolte()
+{
+    if (nvmlInit () != NVML_SUCCESS)
+    {
+        cout << "init error";
+        return;
+    }
+    int i = 0;
+    nvmlReturn_t result;
+    nvmlDevice_t device;
+    result = nvmlDeviceGetHandleByIndex(i, &device);
+    if (NVML_SUCCESS != result)
+    {
+      printf("Failed to get handle for device %i: %s\n", i, nvmlErrorString(result));
+      return;
+    }
+    
+    result = nvmlDeviceSetPowerManagementLimit (device, 175000);
+    if (NVML_SUCCESS != result)
+    {
+      printf("Failed to set power limit of device %i: %s\n", i, nvmlErrorString(result));
+      return;
+    }
+
+    result = nvmlDeviceResetApplicationsClocks (device);
+    if (NVML_SUCCESS != result)
+    {
+      printf("Failed to reset clock of device %i: %s\n", i, nvmlErrorString(result));
+      return;
+    }
+
+    nvmlEnableState_t set = 1;
+    result = nvmlDeviceSetAutoBoostedClocksEnabled(device, set);
+    if (NVML_SUCCESS != result)
+    {
+      printf("Failed to disable autoboost of device %i: %s\n", i, nvmlErrorString(result));
       return;
     }
 
