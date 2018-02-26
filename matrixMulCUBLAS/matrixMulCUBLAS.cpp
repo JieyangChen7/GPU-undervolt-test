@@ -323,7 +323,7 @@ int matrixMultiply()
 
         if (resCUBLAS != true)
         {
-            printDiff(reference, h_CUBLAS, matrix_size.uiWC, matrix_size.uiHC, 100, 1.0e-5f);
+            printDiff(h_C2, h_C, matrix_size.uiWC, matrix_size.uiHC, 100, 1.0e-5f);
         }
 
         printf("Comparing CUBLAS Matrix Multiply with CPU results: %s\n", (true == resCUBLAS) ? "PASS" : "FAIL");
@@ -367,10 +367,11 @@ int matrixMultiply()
     free(h_A);
     free(h_B);
     free(h_C);
-    free(reference);
+    free(h_C2);
     checkCudaErrors(cudaFree(d_A));
     checkCudaErrors(cudaFree(d_B));
     checkCudaErrors(cudaFree(d_C));
+    checkCudaErrors(cudaFree(d_C2));
 
     // if (resCUBLAS == true)
     // {
