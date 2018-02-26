@@ -107,7 +107,7 @@ void undervolte()
       printf("Failed to set clock of device %i: %s\n", i, nvmlErrorString(result));
       return;
     }
-    nvmlEnableState_t set = 0;
+    nvmlEnableState_t set = NVML_FEATURE_DISABLED;
     result = nvmlDeviceSetAutoBoostedClocksEnabled(device, set);
     if (NVML_SUCCESS != result)
     {
@@ -148,7 +148,7 @@ void resetvolte()
       return;
     }
 
-    nvmlEnableState_t set = 1;
+    nvmlEnableState_t set = NVML_FEATURE_ENABLED;
     result = nvmlDeviceSetAutoBoostedClocksEnabled(device, set);
     if (NVML_SUCCESS != result)
     {
