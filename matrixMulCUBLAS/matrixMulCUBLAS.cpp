@@ -202,7 +202,7 @@ void initializeCUDA(int argc, char **argv, int &devID, int &iSizeMultiple, sMatr
     // matrix_size.uiWC = 2 * block_size * iSizeMultiple;
     // matrix_size.uiHC = 4 * block_size * iSizeMultiple;
 
-    int n = 10240;
+    int n = 5120;
 
     matrix_size.uiWA = n;
     matrix_size.uiHA = n;
