@@ -274,6 +274,12 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
     dim3 threads(block_size, block_size);
     dim3 grid(matrix_size.uiWC / threads.x, matrix_size.uiHC / threads.y);
 
+    // compute reference solution
+    printf("Computing result using host CPU...");
+    float *reference = (float *)malloc(mem_size_C);
+    matrixMulCPU(reference, h_A, h_B, matrix_size.uiHA, matrix_size.uiWA, matrix_size.uiWB);
+    printf("done.\n");
+
     // create and start timer
     printf("Computing result using CUBLAS...");
 
@@ -296,6 +302,8 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
         checkCudaErrors(cudaEventCreate(&start));
         checkCudaErrors(cudaEventCreate(&stop));
 
+
+
         // Record the start event
         checkCudaErrors(cudaEventRecord(start, NULL));
 
@@ -304,29 +312,40 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
             //note cublas is column primary!
             //need to transpose the order
             checkCudaErrors(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, &alpha, d_B, matrix_size.uiWB, d_A, matrix_size.uiWA, &beta, d_C, matrix_size.uiWB));
+             // copy result from device to host
+            checkCudaErrors(cudaMemcpy(h_CUBLAS, d_C, mem_size_C, cudaMemcpyDeviceToHost));
+            // check result (CUBLAS)
+            bool resCUBLAS = sdkCompareL2fe(reference, h_CUBLAS, size_C, 1.0e-6f);
+
+            if (resCUBLAS != true)
+            {
+                printDiff(reference, h_CUBLAS, matrix_size.uiWC, matrix_size.uiHC, 100, 1.0e-5f);
+            }
+
+            printf("Comparing CUBLAS Matrix Multiply with CPU results: %s\n", (true == resCUBLAS) ? "PASS" : "FAIL");
 
         }
 
-        printf("done.\n");
+        // printf("done.\n");
 
-        // Record the stop event
-        checkCudaErrors(cudaEventRecord(stop, NULL));
+        // // Record the stop event
+        // checkCudaErrors(cudaEventRecord(stop, NULL));
 
-        // Wait for the stop event to complete
-        checkCudaErrors(cudaEventSynchronize(stop));
+        // // Wait for the stop event to complete
+        // checkCudaErrors(cudaEventSynchronize(stop));
 
-        float msecTotal = 0.0f;
-        checkCudaErrors(cudaEventElapsedTime(&msecTotal, start, stop));
+        // float msecTotal = 0.0f;
+        // checkCudaErrors(cudaEventElapsedTime(&msecTotal, start, stop));
 
-        // Compute and print the performance
-        float msecPerMatrixMul = msecTotal / nIter;
-        double flopsPerMatrixMul = 2.0 * (double)matrix_size.uiHC * (double)matrix_size.uiWC * (double)matrix_size.uiHB;
-        double gigaFlops = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul / 1000.0f);
-        printf(
-            "Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops\n",
-            gigaFlops,
-            msecPerMatrixMul,
-            flopsPerMatrixMul);
+        // // Compute and print the performance
+        // float msecPerMatrixMul = msecTotal / nIter;
+        // double flopsPerMatrixMul = 2.0 * (double)matrix_size.uiHC * (double)matrix_size.uiWC * (double)matrix_size.uiHB;
+        // double gigaFlops = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul / 1000.0f);
+        // printf(
+        //     "Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops\n",
+        //     gigaFlops,
+        //     msecPerMatrixMul,
+        //     flopsPerMatrixMul);
 
         // copy result from device to host
         checkCudaErrors(cudaMemcpy(h_CUBLAS, d_C, mem_size_C, cudaMemcpyDeviceToHost));
@@ -335,21 +354,9 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
         checkCudaErrors(cublasDestroy(handle));
     }
 
-    // compute reference solution
-    printf("Computing result using host CPU...");
-    float *reference = (float *)malloc(mem_size_C);
-    matrixMulCPU(reference, h_A, h_B, matrix_size.uiHA, matrix_size.uiWA, matrix_size.uiWB);
-    printf("done.\n");
+    
 
-    // check result (CUBLAS)
-    bool resCUBLAS = sdkCompareL2fe(reference, h_CUBLAS, size_C, 1.0e-6f);
-
-    if (resCUBLAS != true)
-    {
-        printDiff(reference, h_CUBLAS, matrix_size.uiWC, matrix_size.uiHC, 100, 1.0e-5f);
-    }
-
-    printf("Comparing CUBLAS Matrix Multiply with CPU results: %s\n", (true == resCUBLAS) ? "PASS" : "FAIL");
+    
 
     printf("\nNOTE: The CUDA Samples are not meant for performance measurements. Results may vary when GPU Boost is enabled.\n");
 
