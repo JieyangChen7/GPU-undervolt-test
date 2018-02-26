@@ -275,10 +275,10 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
     dim3 grid(matrix_size.uiWC / threads.x, matrix_size.uiHC / threads.y);
 
     // compute reference solution
-    // printf("Computing result using host CPU...");
-    // float *reference = (float *)malloc(mem_size_C);
+    printf("Computing result using host CPU...");
+    float *reference = (float *)malloc(mem_size_C);
     // matrixMulCPU(reference, h_A, h_B, matrix_size.uiHA, matrix_size.uiWA, matrix_size.uiWB);
-    // printf("done.\n");
+    printf("done.\n");
 
     // create and start timer
     printf("Computing result using CUBLAS...\n");
