@@ -298,7 +298,7 @@ int matrixMultiply()
     float msecTotal = 0.0f;
     checkCudaErrors(cudaEventElapsedTime(&msecTotal, start, stop));
     //Compute and print the performance
-    float msecPerMatrixMul = msecTotal / nIter;
+    float msecPerMatrixMul = msecTotal;
     double flopsPerMatrixMul = 2.0 * (double)matrix_size.uiHC * (double)matrix_size.uiWC * (double)matrix_size.uiHB;
     double gigaFlops = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul / 1000.0f);
     printf(
