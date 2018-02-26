@@ -284,6 +284,7 @@ int matrixMultiply()
 
     printf("Computing result using CUBLAS (normal power)...\n");
     resetvolte();
+    checkCudaErrors(cudaEventRecord(start, NULL));
     checkCudaErrors(cublasSgemm(handle, 
                                 CUBLAS_OP_N, CUBLAS_OP_N, 
                                 matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, 
@@ -292,6 +293,21 @@ int matrixMultiply()
                                 d_A, matrix_size.uiWA, 
                                 &beta, 
                                 d_C2, matrix_size.uiWB));
+    checkCudaErrors(cudaEventRecord(stop, NULL));
+    checkCudaErrors(cudaEventSynchronize(stop));
+    float msecTotal = 0.0f;
+    checkCudaErrors(cudaEventElapsedTime(&msecTotal, start, stop));
+    //Compute and print the performance
+    float msecPerMatrixMul = msecTotal / nIter;
+    double flopsPerMatrixMul = 2.0 * (double)matrix_size.uiHC * (double)matrix_size.uiWC * (double)matrix_size.uiHB;
+    double gigaFlops = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul / 1000.0f);
+    printf(
+        "Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops\n",
+        gigaFlops,
+        msecPerMatrixMul,
+        flopsPerMatrixMul);
+
+
     checkCudaErrors(cudaMemcpy(h_C2, d_C2, mem_size_C, cudaMemcpyDeviceToHost));
 
    
@@ -308,6 +324,7 @@ int matrixMultiply()
     {
         //note cublas is column primary!
         //need to transpose the order
+        checkCudaErrors(cudaEventRecord(start, NULL));
         checkCudaErrors(cublasSgemm(handle, 
                                     CUBLAS_OP_N, CUBLAS_OP_N, 
                                     matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, 
@@ -316,6 +333,20 @@ int matrixMultiply()
                                     d_A, matrix_size.uiWA, 
                                     &beta,
                                     d_C, matrix_size.uiWB));
+        checkCudaErrors(cudaEventRecord(stop, NULL));
+        checkCudaErrors(cudaEventSynchronize(stop));
+        float msecTotal = 0.0f;
+        checkCudaErrors(cudaEventElapsedTime(&msecTotal, start, stop));
+        //Compute and print the performance
+        float msecPerMatrixMul = msecTotal / nIter;
+        double flopsPerMatrixMul = 2.0 * (double)matrix_size.uiHC * (double)matrix_size.uiWC * (double)matrix_size.uiHB;
+        double gigaFlops = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul / 1000.0f);
+        printf(
+            "Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops\n",
+            gigaFlops,
+            msecPerMatrixMul,
+            flopsPerMatrixMul);
+
         // copy result from device to host
         checkCudaErrors(cudaMemcpy(h_C, d_C, mem_size_C, cudaMemcpyDeviceToHost));
         // check result (CUBLAS)
