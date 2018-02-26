@@ -202,7 +202,7 @@ void initializeCUDA(int argc, char **argv, int &devID, int &iSizeMultiple, sMatr
     // matrix_size.uiWC = 2 * block_size * iSizeMultiple;
     // matrix_size.uiHC = 4 * block_size * iSizeMultiple;
 
-    int n = 1024;
+    int n = 2048;
 
     matrix_size.uiWA = n;
     matrix_size.uiHA = n;
@@ -281,10 +281,10 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
     printf("done.\n");
 
     // create and start timer
-    printf("Computing result using CUBLAS...");
+    printf("Computing result using CUBLAS...\n");
 
     // execute the kernel
-    int nIter = 10;
+    int nIter = 30;
 
     // CUBLAS version 2.0
     {
@@ -405,7 +405,7 @@ void undervolte()
     }
     cout << "GPU " << i << " power limit: " << power_limit << "mW" <<endl;
 
-    //result = nvmlDeviceSetApplicationsClocks ( device, 2505, 875 );
+    result = nvmlDeviceSetApplicationsClocks ( device, 2505, 875 );
     if (NVML_SUCCESS != result)
     {
       printf("Failed to set clock of device %i: %s\n", i, nvmlErrorString(result));
