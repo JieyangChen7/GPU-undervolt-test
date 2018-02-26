@@ -228,7 +228,7 @@ GENCODE_FLAGS += -gencode arch=compute_$(HIGHEST_SM),code=compute_$(HIGHEST_SM)
 endif
 endif
 
-LIBRARIES += -lcublas
+LIBRARIES += -lcublas -lnvidia-ml
 
 ifeq ($(SAMPLE_ENABLED),0)
 EXEC ?= @echo "[@]"

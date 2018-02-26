@@ -60,6 +60,8 @@
 #include <helper_functions.h>
 #include <helper_cuda.h>
 
+#include <nvml.h>
+
 #ifndef min
 #define min(a,b) ((a < b) ? a : b)
 #endif
@@ -359,6 +361,34 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
     }
 }
 
+void undervolte()
+{
+    if (nvmlInit () != NVML_SUCCESS)
+    {
+        cout << "init error";
+        return -1;
+    }
+    int i = 0;
+    nvmlReturn_t result;
+    nvmlDevice_t device;
+    result = nvmlDeviceGetHandleByIndex(i, &device);
+    if (NVML_SUCCESS != result)
+    {
+      printf("Failed to get handle for device %i: %s\n", i, nvmlErrorString(result));
+      return -1;
+    }
+    unsigned int power_limit;
+    result = nvmlDeviceGetPowerManagementLimit ( device, &power_limit );
+    if (NVML_SUCCESS != result)
+    {
+      printf("Failed to get power limit of device %i: %s\n", i, nvmlErrorString(result));
+      return -1;
+    }
+    cout << "GPU " << i << " power limit: " << power_limit << "mW" <<endl;
+
+
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
 ////////////////////////////////////////////////////////////////////////////////
@@ -370,6 +400,8 @@ int main(int argc, char **argv)
     sMatrixSize matrix_size;
 
     initializeCUDA(argc, argv, devID, sizeMult, matrix_size);
+
+    undervolte();
 
     int matrix_result = matrixMultiply(argc, argv, devID, matrix_size);
 
