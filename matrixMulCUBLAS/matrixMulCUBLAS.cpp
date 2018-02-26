@@ -61,6 +61,8 @@
 #include <helper_cuda.h>
 
 #include <nvml.h>
+using std::cout;
+using std::endl;
 
 #ifndef min
 #define min(a,b) ((a < b) ? a : b)
@@ -366,7 +368,7 @@ void undervolte()
     if (nvmlInit () != NVML_SUCCESS)
     {
         cout << "init error";
-        return -1;
+        return;
     }
     int i = 0;
     nvmlReturn_t result;
@@ -375,14 +377,14 @@ void undervolte()
     if (NVML_SUCCESS != result)
     {
       printf("Failed to get handle for device %i: %s\n", i, nvmlErrorString(result));
-      return -1;
+      return;
     }
     unsigned int power_limit;
     result = nvmlDeviceGetPowerManagementLimit ( device, &power_limit );
     if (NVML_SUCCESS != result)
     {
       printf("Failed to get power limit of device %i: %s\n", i, nvmlErrorString(result));
-      return -1;
+      return;
     }
     cout << "GPU " << i << " power limit: " << power_limit << "mW" <<endl;
 
