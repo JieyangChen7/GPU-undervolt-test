@@ -348,7 +348,7 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
         //     flopsPerMatrixMul);
 
         // copy result from device to host
-        checkCudaErrors(cudaMemcpy(h_CUBLAS, d_C, mem_size_C, cudaMemcpyDeviceToHost));
+        //checkCudaErrors(cudaMemcpy(h_CUBLAS, d_C, mem_size_C, cudaMemcpyDeviceToHost));
 
         // Destroy the handle
         checkCudaErrors(cublasDestroy(handle));
@@ -369,14 +369,15 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
     checkCudaErrors(cudaFree(d_B));
     checkCudaErrors(cudaFree(d_C));
 
-    if (resCUBLAS == true)
-    {
-        return EXIT_SUCCESS;    // return value = 1
-    }
-    else
-    {
-        return EXIT_FAILURE;     // return value = 0
-    }
+    // if (resCUBLAS == true)
+    // {
+    //     return EXIT_SUCCESS;    // return value = 1
+    // }
+    // else
+    // {
+    //     return EXIT_FAILURE;     // return value = 0
+    // }
+    return 0;
 }
 
 void undervolte()
