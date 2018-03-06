@@ -94,14 +94,14 @@ void undervolte()
       return;
     }
 
-    result = nvmlDeviceSetPowerManagementLimit (device, 100000);
+    result = nvmlDeviceSetPowerManagementLimit (device, 30000);
     if (NVML_SUCCESS != result)
     {
       printf("Failed to set power limit of device %i: %s\n", i, nvmlErrorString(result));
       return;
     }
 
-    result = nvmlDeviceSetApplicationsClocks ( device, 2505, 875 );
+    result = nvmlDeviceSetApplicationsClocks ( device, 3510, 1885 );
     if (NVML_SUCCESS != result)
     {
       printf("Failed to set clock of device %i: %s\n", i, nvmlErrorString(result));
@@ -134,7 +134,7 @@ void resetvolte()
       return;
     }
     
-    result = nvmlDeviceSetPowerManagementLimit (device, 175000);
+    result = nvmlDeviceSetPowerManagementLimit (device, 38500);
     if (NVML_SUCCESS != result)
     {
       printf("Failed to set power limit of device %i: %s\n", i, nvmlErrorString(result));
@@ -283,7 +283,7 @@ int matrixMultiply()
 
 
     printf("Computing result using CUBLAS (normal power)...\n");
-    resetvolte();
+    // resetvolte();
     checkCudaErrors(cudaEventRecord(start, NULL));
     checkCudaErrors(cublasSgemm(handle, 
                                 CUBLAS_OP_N, CUBLAS_OP_N, 
@@ -303,6 +303,7 @@ int matrixMultiply()
     double gigaFlops = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul / 1000.0f);
     printf(
         "Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops\n",
+	
         gigaFlops,
         msecPerMatrixMul,
         flopsPerMatrixMul);
@@ -313,13 +314,14 @@ int matrixMultiply()
    
     // create and start timer
     printf("Computing result using CUBLAS (low power)...\n");
-    undervolte();
+    //undervolte();
     // execute the kernel
-    int nIter = 30;
+    int nIter = 100;
 
     // Record the start event
     //checkCudaErrors(cudaEventRecord(start, NULL));
-
+    int fail_count = 0;
+    float total_perf = 0.0;
     for (int j = 0; j < nIter; j++)
     {
         //note cublas is column primary!
@@ -342,25 +344,30 @@ int matrixMultiply()
         double flopsPerMatrixMul = 2.0 * (double)matrix_size.uiHC * (double)matrix_size.uiWC * (double)matrix_size.uiHB;
         double gigaFlops = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul / 1000.0f);
         printf(
-            "Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops\n",
+            "[%d]Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops\n",
+	    j,
             gigaFlops,
             msecPerMatrixMul,
             flopsPerMatrixMul);
+	total_perf += gigaFlops;
 
         // copy result from device to host
         checkCudaErrors(cudaMemcpy(h_C, d_C, mem_size_C, cudaMemcpyDeviceToHost));
         // check result (CUBLAS)
-        bool resCUBLAS = sdkCompareL2fe(h_C2, h_C, size_C, 1.0e-6f);
+        bool resCUBLAS = sdkCompareL2fe(h_C2, h_C, size_C, 1.0e-10f);
 
         if (resCUBLAS != true)
         {
-            printDiff(h_C2, h_C, matrix_size.uiWC, matrix_size.uiHC, 100, 1.0e-5f);
+            printDiff(h_C2, h_C, matrix_size.uiWC, matrix_size.uiHC, 100, 1.0e-5f);\
+	    fail_count++;
         }
 
         printf("Comparing CUBLAS Matrix Multiply with CPU results: %s\n", (true == resCUBLAS) ? "PASS" : "FAIL");
 
     }
-
+	printf("total test: %d, failed: %d.\n", nIter, fail_count);
+	printf("failure rate: %f.\n", (float)fail_count/nIter);
+	printf("average perf: %.2f.\n", total_perf/nIter);
         // printf("done.\n");
 
         // // Record the stop event
@@ -392,7 +399,7 @@ int matrixMultiply()
 
     
 
-    printf("\nNOTE: The CUDA Samples are not meant for performance measurements. Results may vary when GPU Boost is enabled.\n");
+    //printf("\nNOTE: The CUDA Samples are not meant for performance measurements. Results may vary when GPU Boost is enabled.\n");
 
     // clean up memory
     free(h_A);
@@ -431,6 +438,6 @@ int main(int argc, char **argv)
     
 
     int matrix_result = matrixMultiply();
-    resetvolte();
+    //resetvolte();
     return matrix_result;
 }
