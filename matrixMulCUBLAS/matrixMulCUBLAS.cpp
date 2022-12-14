@@ -61,6 +61,15 @@
 #include <helper_cuda.h>
 
 #include <nvml.h>
+
+#include <chrono>
+using namespace std::chrono;
+#include <sys/types.h>
+#include <unistd.h>
+#include <cstdlib>
+#include <string>
+
+using namespace std;
 using std::cout;
 using std::endl;
 
@@ -76,87 +85,116 @@ typedef struct _matrixSize      // Optional Command-line multiplier for matrix s
     unsigned int uiWA, uiHA, uiWB, uiHB, uiWC, uiHC;
 } sMatrixSize;
 
+int start_measure_cpu() {
+    pid_t  pid;
+    int    status;
+    char * cmd[2];
+    cmd[0]="cpu-energy-meter";
+    cmd[1]=NULL;
 
-void undervolte()
+    if ((pid = fork()) < 0) {     /* fork a child process           */
+        printf("*** ERROR: forking child process failed\n");
+        exit(1);
+    }
+    else if (pid == 0) {          /* for the child process:         */
+        if (execvp("/home/jieyang/software/cpu-energy-meter/cpu-energy-meter", cmd) < 0) {     /* execute the command  */
+            printf("*** ERROR: exec failed\n");
+            exit(1);
+        }
+    }
+    return pid;
+}
+
+void stop_measure_cpu(int pid) {
+    string pid_str = std::to_string(pid);
+    string kill_cmd = "sudo kill -2 "+ pid_str;
+    printf("executing: %s\n", kill_cmd.c_str());
+    system(kill_cmd.c_str());
+}
+
+unsigned long long start_measure_gpu(nvmlDevice_t device) {
+    unsigned long long energy;
+    nvmlDeviceGetTotalEnergyConsumption(device, &energy);
+    return energy;
+}
+
+unsigned long long stop_measure_gpu(nvmlDevice_t device, unsigned long long start_energy) {
+    unsigned long long stop_energy;
+    nvmlDeviceGetTotalEnergyConsumption(device, &stop_energy);
+    return stop_energy - start_energy;
+    //printf("GPU energy: %llu\n", stop_energy - start_energy);
+}
+
+
+void change_offset(int offset){
+
+    string offset_str = std::to_string(offset);
+    string offset_cmd = "sudo nvidia-settings -a [gpu:0]/GPUGraphicsClockOffset[4]="+ offset_str;
+    system(offset_cmd.c_str());
+}
+
+int undervolte(nvmlDevice_t device, int clock, int power)
 {
-    if (nvmlInit () != NVML_SUCCESS)
-    {
-        cout << "init error";
-        return;
-    }
-    int i = 0;
+   
+
     nvmlReturn_t result;
-    nvmlDevice_t device;
-    result = nvmlDeviceGetHandleByIndex(i, &device);
+
+
+    result = nvmlDeviceSetPersistenceMode(device, NVML_FEATURE_ENABLED);
     if (NVML_SUCCESS != result)
     {
-      printf("Failed to get handle for device %i: %s\n", i, nvmlErrorString(result));
-      return;
+        printf("Failed to set PM: %s.\n", nvmlErrorString(result));
+        return -1;
     }
 
-    result = nvmlDeviceSetPowerManagementLimit (device, 30000);
+    result = nvmlDeviceSetPowerManagementLimit (device, power);
     if (NVML_SUCCESS != result)
     {
-      printf("Failed to set power limit of device %i: %s\n", i, nvmlErrorString(result));
-      return;
+      printf("Failed to set power limit of device: %s\n", nvmlErrorString(result));
+      return -1;
     }
+    // unsigned int get_power_limit;
+    // result = nvmlDeviceGetEnforcedPowerLimit(device, &get_power_limit);
+    // if (NVML_SUCCESS != result) {
+    //     printf("Failed to get power limit of device %i: %s\n", i, nvmlErrorString(result));
+    //     return;
+    // }
+    // printf("Power limit set to: %d\n", get_power_limit);
 
-    result = nvmlDeviceSetApplicationsClocks ( device, 3510, 1885 );
+
+    result = nvmlDeviceSetGpuLockedClocks ( device, clock, clock );
     if (NVML_SUCCESS != result)
     {
-      printf("Failed to set clock of device %i: %s\n", i, nvmlErrorString(result));
-      return;
+      printf("Failed to set clock of device: %s\n", nvmlErrorString(result));
+      return -1;
     }
-    nvmlEnableState_t set = NVML_FEATURE_DISABLED;
-    result = nvmlDeviceSetAutoBoostedClocksEnabled(device, set);
+    unsigned int get_gpu_clock;
+    result = nvmlDeviceGetClock(device, NVML_CLOCK_GRAPHICS, NVML_CLOCK_ID_CURRENT, &get_gpu_clock);
     if (NVML_SUCCESS != result)
     {
-      printf("Failed to disable autoboost of device %i: %s\n", i, nvmlErrorString(result));
-      return;
+      printf("Failed to get GPU clock of device: %s\n", nvmlErrorString(result));
+      return -1;
     }
+    unsigned int get_mem_clock;
+    result = nvmlDeviceGetClock(device, NVML_CLOCK_MEM, NVML_CLOCK_ID_CURRENT, &get_mem_clock);
+    if (NVML_SUCCESS != result)
+    {
+      printf("Failed to get memory clock of device: %s\n", nvmlErrorString(result));
+      return -1;
+    }
+    //printf("Clock is set to: %u, %u\n", get_gpu_clock, get_mem_clock);
+    return get_gpu_clock;
+
+    // nvmlEnableState_t set = NVML_FEATURE_DISABLED;
+    // result = nvmlDeviceSetAutoBoostedClocksEnabled(device, set);
+    // if (NVML_SUCCESS != result)
+    // {
+    //   printf("Failed to disable autoboost of device %i: %s\n", i, nvmlErrorString(result));
+    //   return;
+    // }
 
 }
 
-void resetvolte()
-{
-    if (nvmlInit () != NVML_SUCCESS)
-    {
-        cout << "init error";
-        return;
-    }
-    int i = 0;
-    nvmlReturn_t result;
-    nvmlDevice_t device;
-    result = nvmlDeviceGetHandleByIndex(i, &device);
-    if (NVML_SUCCESS != result)
-    {
-      printf("Failed to get handle for device %i: %s\n", i, nvmlErrorString(result));
-      return;
-    }
-    
-    result = nvmlDeviceSetPowerManagementLimit (device, 38500);
-    if (NVML_SUCCESS != result)
-    {
-      printf("Failed to set power limit of device %i: %s\n", i, nvmlErrorString(result));
-      return;
-    }
-
-    result = nvmlDeviceResetApplicationsClocks (device);
-    if (NVML_SUCCESS != result)
-    {
-      printf("Failed to reset clock of device %i: %s\n", i, nvmlErrorString(result));
-      return;
-    }
-
-    nvmlEnableState_t set = NVML_FEATURE_ENABLED;
-    result = nvmlDeviceSetAutoBoostedClocksEnabled(device, set);
-    if (NVML_SUCCESS != result)
-    {
-      printf("Failed to disable autoboost of device %i: %s\n", i, nvmlErrorString(result));
-      return;
-    }
-
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 //! Compute reference data set matrix multiply on CPU
@@ -167,35 +205,40 @@ void resetvolte()
 //! @param hA         height of matrix A
 //! @param wB         width of matrix B
 ////////////////////////////////////////////////////////////////////////////////
+
+template <typename T>
 void
-matrixMulCPU(float *C, const float *A, const float *B, unsigned int hA, unsigned int wA, unsigned int wB)
+matrixMulCPU(T *C, const T *A, const T *B, unsigned int hA, unsigned int wA, unsigned int wB)
 {
     for (unsigned int i = 0; i < hA; ++i)
         for (unsigned int j = 0; j < wB; ++j)
         {
-            double sum = 0;
+            T sum = 0;
 
             for (unsigned int k = 0; k < wA; ++k)
             {
-                double a = A[i * wA + k];
-                double b = B[k * wB + j];
+                T a = A[i * wA + k];
+                T b = B[k * wB + j];
                 sum += a * b;
             }
 
-            C[i * wB + j] = (float)sum;
+            C[i * wB + j] = (T)sum;
         }
 }
 
-// Allocates a matrix with random float entries.
-void randomInit(float *data, int size)
+// Allocates a matrix with random double entries.
+template <typename T>
+void randomInit(T *data, int size)
 {
     for (int i = 0; i < size; ++i)
-        data[i] = rand() / (float)RAND_MAX;
+        data[i] = rand() / (T)RAND_MAX;
 }
 
-void printDiff(float *data1, float *data2, int width, int height, int iListLength, float fListTol)
+
+template <typename T>
+void printDiff(T *data1, T *data2, int width, int height, int iListLength, T fListTol)
 {
-    printf("Listing first %d Differences > %.6f...\n", iListLength, fListTol);
+    //printf("Listing first %d Differences > %.6f...\n", iListLength, fListTol);
     int i,j,k;
     int error_count=0;
 
@@ -203,13 +246,13 @@ void printDiff(float *data1, float *data2, int width, int height, int iListLengt
     {
         if (error_count < iListLength)
         {
-            printf("\n  Row %d:\n", j);
+            //printf("\n  Row %d:\n", j);
         }
 
         for (i = 0; i < width; i++)
         {
             k = j * width + i;
-            float fDiff = fabs(data1[k] - data2[k]);
+            T fDiff = fabs(data1[k] - data2[k]);
 
             if (fDiff > fListTol)
             {
@@ -223,7 +266,7 @@ void printDiff(float *data1, float *data2, int width, int height, int iListLengt
         }
     }
 
-    printf(" \n  Total Errors = %d\n", error_count);
+    //printf(" \n  Total Errors = %d\n", error_count);
 }
 
 
@@ -231,38 +274,56 @@ void printDiff(float *data1, float *data2, int width, int height, int iListLengt
 ////////////////////////////////////////////////////////////////////////////////
 //! Run a simple test matrix multiply using CUBLAS
 ////////////////////////////////////////////////////////////////////////////////
-int matrixMultiply()
+template <typename T>
+int matrixMultiply(int n)
 {
-    sMatrixSize matrix_size;
-    int n = 10240;
+    if (nvmlInit () != NVML_SUCCESS)
+    {
+        cout << "init error";
+        return 0;
+    }
+    int i = 0;
+    nvmlReturn_t result;
+    nvmlDevice_t device;
+    result = nvmlDeviceGetHandleByIndex(i, &device);
+    if (NVML_SUCCESS != result)
+    {
+      printf("Failed to get handle for device %i: %s\n", i, nvmlErrorString(result));
+      return 0;
+    }
 
-    matrix_size.uiWA = n;
-    matrix_size.uiHA = n;
-    matrix_size.uiWB = n;
-    matrix_size.uiHB = n;
-    matrix_size.uiWC = n;
-    matrix_size.uiHC = n;
+    change_offset(0);
+
+    //int measure_cpu_pid = start_measure_cpu();
+
+    sMatrixSize matrix_size;
+    //int n = 51200-1024*5;//30720;
+    //int n = 30720;
+
+    int b = 256;
+    // undervolte(device, 1800, 100000);
 
     // allocate host memory for matrices A and B
-    unsigned int size_A = matrix_size.uiWA * matrix_size.uiHA;
-    unsigned int mem_size_A = sizeof(float) * size_A;
-    float *h_A = (float *)malloc(mem_size_A);
+    unsigned int size_A = n * b;
+    size_t mem_size_A = sizeof(T) * size_A;
+    T *h_A = (T *)malloc(mem_size_A);
 
-    unsigned int size_B = matrix_size.uiWB * matrix_size.uiHB;
-    unsigned int mem_size_B = sizeof(float) * size_B;
-    float *h_B = (float *)malloc(mem_size_B);
+    unsigned int size_B = b * n;
+    size_t mem_size_B = sizeof(T) * size_B;
+    T *h_B = (T *)malloc(mem_size_B);
 
-    unsigned int size_C = matrix_size.uiWC * matrix_size.uiHC;
-    unsigned int mem_size_C = sizeof(float) * size_C;
-    float *h_C      = (float *) malloc(mem_size_C);
-    float *h_C2      = (float *) malloc(mem_size_C);
+    unsigned int size_C = n * n;
+    size_t mem_size_C = sizeof(T) * size_C;
+    T *h_C      = (T *) malloc(mem_size_C);
+    T *h_C2      = (T *) malloc(mem_size_C);
 
-    float *d_A, *d_B, *d_C, *d_C2;
+    T *d_A, *d_B, *d_C;//, *d_C2;
     checkCudaErrors(cudaMalloc((void **) &d_A, mem_size_A));
     checkCudaErrors(cudaMalloc((void **) &d_B, mem_size_B));
     checkCudaErrors(cudaMalloc((void **) &d_C, mem_size_C));
-    checkCudaErrors(cudaMalloc((void **) &d_C2, mem_size_C));
-
+    printf("allocate: %llu\n", mem_size_A+mem_size_B+mem_size_C);
+    //checkCudaErrors(cudaMalloc((void **) &d_C2, mem_size_C));
+    //d_C2 = d_C;
     // set seed for rand()
     srand(2006);
 
@@ -272,102 +333,152 @@ int matrixMultiply()
     checkCudaErrors(cudaMemcpy(d_A, h_A, mem_size_A, cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpy(d_B, h_B, mem_size_B, cudaMemcpyHostToDevice));
 
-    const float alpha = 1.0f;
-    const float beta  = 0.0f;
+    const T alpha = 1.0f;
+    const T beta  = 0.0f;
     cublasHandle_t handle;
     cudaEvent_t start, stop;
     checkCudaErrors(cudaEventCreate(&start));
     checkCudaErrors(cudaEventCreate(&stop));
 
+    high_resolution_clock::time_point t1, t2;
+    double nvml_time;
     checkCudaErrors(cublasCreate(&handle));
-
+    unsigned long long start_energy;
 
     printf("Computing result using CUBLAS (normal power)...\n");
-    // resetvolte();
+    undervolte(device, 1500, 338000);
     checkCudaErrors(cudaEventRecord(start, NULL));
-    checkCudaErrors(cublasSgemm(handle, 
-                                CUBLAS_OP_N, CUBLAS_OP_N, 
-                                matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, 
-                                &alpha, 
-                                d_B, matrix_size.uiWB, 
-                                d_A, matrix_size.uiWA, 
-                                &beta, 
-                                d_C2, matrix_size.uiWB));
-    checkCudaErrors(cudaEventRecord(stop, NULL));
-    checkCudaErrors(cudaEventSynchronize(stop));
-    float msecTotal = 0.0f;
-    checkCudaErrors(cudaEventElapsedTime(&msecTotal, start, stop));
-    //Compute and print the performance
-    float msecPerMatrixMul = msecTotal;
-    double flopsPerMatrixMul = 2.0 * (double)matrix_size.uiHC * (double)matrix_size.uiWC * (double)matrix_size.uiHB;
-    double gigaFlops = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul / 1000.0f);
-    printf(
-        "Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops\n",
-	
-        gigaFlops,
-        msecPerMatrixMul,
-        flopsPerMatrixMul);
+    if (sizeof(T) == 8) {
+        checkCudaErrors(cublasDgemm(handle, 
+                                    CUBLAS_OP_N, CUBLAS_OP_N, 
+                                    n, n, b, 
+                                    (double*)&alpha, 
+                                    (double*)d_A, n, 
+                                    (double*)d_B, b, 
+                                    (double*)&beta, 
+                                    (double*)d_C, n));
+    } else {
+        checkCudaErrors(cublasSgemm(handle, 
+                                    CUBLAS_OP_N, CUBLAS_OP_N, 
+                                    n, n, b, 
+                                    (float*)&alpha, 
+                                    (float*)d_A, n, 
+                                    (float*)d_B, b, 
+                                    (float*)&beta, 
+                                    (float*)d_C, n));
+    }
 
-
-    checkCudaErrors(cudaMemcpy(h_C2, d_C2, mem_size_C, cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(h_C2, d_C, mem_size_C, cudaMemcpyDeviceToHost));
 
    
     // create and start timer
     printf("Computing result using CUBLAS (low power)...\n");
-    //undervolte();
-    // execute the kernel
-    int nIter = 100;
+
+
+    // t1 = high_resolution_clock::now(); 
+    // system("sudo ls > /dev/null");
+    // t2 = high_resolution_clock::now();
+    // nvml_time = duration_cast<milliseconds>(t2 - t1).count();
+    // printf("CPUPOWER time: %f\n", nvml_time);
+
+
+    // t1 = high_resolution_clock::now(); 
+    // system("sudo cpupower frequency-set -u 2000000 > /dev/null");
+    // t2 = high_resolution_clock::now();
+    // nvml_time = duration_cast<milliseconds>(t2 - t1).count();
+    // printf("CPUPOWER time: %f\n", nvml_time);
+
+    // t1 = high_resolution_clock::now(); 
+    // system("sudo cpupower frequency-set -u 3000000 > /dev/null");
+    // t2 = high_resolution_clock::now();
+    // nvml_time = duration_cast<milliseconds>(t2 - t1).count();
+    // printf("CPUPOWER time: %f\n", nvml_time);
+
+
+    // t1 = high_resolution_clock::now(); 
+    // system("sudo cpupower frequency-set -u 4000000 > /dev/null");
+    // t2 = high_resolution_clock::now();
+    // nvml_time = duration_cast<milliseconds>(t2 - t1).count();
+    // printf("CPUPOWER time: %f\n", nvml_time);
+
+    // change_offset(0);
+    // // execute the kernel
+    // int actual_f = undervolte(device, 500, 100000);
+    // unsigned int static_power_mill;
+    // nvmlDeviceGetPowerUsage(device, &static_power_mill);
+    // double static_power = static_power_mill / 1000.0;
+    // printf("static: %f\n", static_power);
 
     // Record the start event
     //checkCudaErrors(cudaEventRecord(start, NULL));
+
+    change_offset(200);
+
+    int repeat = 100;
     int fail_count = 0;
-    float total_perf = 0.0;
-    for (int j = 0; j < nIter; j++)
+    double total_perf = 0.0;
+    for (int f = 1900; f <= 2000; f+=100)
+    // f = 1600;
     {
-        //note cublas is column primary!
-        //need to transpose the order
+        int actual_f = undervolte(device, f, 338000);
+        undervolte(device, f, 338000);
+        undervolte(device, f, 338000);
+        undervolte(device, f, 338000);
+        undervolte(device, f, 338000);
+        undervolte(device, f, 338000);
+
         checkCudaErrors(cudaEventRecord(start, NULL));
-        checkCudaErrors(cublasSgemm(handle, 
-                                    CUBLAS_OP_N, CUBLAS_OP_N, 
-                                    matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, 
-                                    &alpha, 
-                                    d_B, matrix_size.uiWB, 
-                                    d_A, matrix_size.uiWA, 
-                                    &beta,
-                                    d_C, matrix_size.uiWB));
+        start_energy = start_measure_gpu(device);
+    	//int measure_cpu_pid = start_measure_cpu();      
+    	for (int r = 0; r < repeat; r++) {
+            if (sizeof(T) == 8) {
+                checkCudaErrors(cublasDgemm(handle, 
+                                            CUBLAS_OP_N, CUBLAS_OP_N, 
+                                            n, n, b, 
+                                            (double*)&alpha, 
+                                            (double*)d_A, n, 
+                                            (double*)d_B, b, 
+                                            (double*)&beta, 
+                                            (double*)d_C, n));
+            } else {
+                checkCudaErrors(cublasSgemm(handle, 
+                                            CUBLAS_OP_N, CUBLAS_OP_N, 
+                                            n, n, b, 
+                                            (float*)&alpha, 
+                                            (float*)d_A, n, 
+                                            (float*)d_B, b, 
+                                            (float*)&beta, 
+                                            (float*)d_C, n));
+            }
+            // checkCudaErrors(cudaMemcpy(h_C, d_C, mem_size_C, cudaMemcpyDeviceToHost));
+            // printDiff(h_C, h_C2, n, n, 10, (T)0.00001);
+        }
+
+	
         checkCudaErrors(cudaEventRecord(stop, NULL));
         checkCudaErrors(cudaEventSynchronize(stop));
-        float msecTotal = 0.0f;
+        start_energy = stop_measure_gpu(device, start_energy);
+        //stop_measure_cpu(measure_cpu_pid);
+	float msecTotal = 0.0f;
         checkCudaErrors(cudaEventElapsedTime(&msecTotal, start, stop));
         //Compute and print the performance
         float msecPerMatrixMul = msecTotal;
-        double flopsPerMatrixMul = 2.0 * (double)matrix_size.uiHC * (double)matrix_size.uiWC * (double)matrix_size.uiHB;
+	    
+
+        
+
+        float flopsPerMatrixMul = 2.0 * (double)n * (double)n * (double)b * repeat;
         double gigaFlops = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul / 1000.0f);
-        printf(
-            "[%d]Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops\n",
-	    j,
-            gigaFlops,
-            msecPerMatrixMul,
-            flopsPerMatrixMul);
+        double power = start_energy/msecPerMatrixMul;
+        printf("%d MHz, %d MHz, %.3f ms, %.3f GFlop, %.3f W, %.3f GFlops/W\n",
+             f, actual_f, msecPerMatrixMul, gigaFlops, power, gigaFlops/power);
 	total_perf += gigaFlops;
 
-        // copy result from device to host
-        checkCudaErrors(cudaMemcpy(h_C, d_C, mem_size_C, cudaMemcpyDeviceToHost));
-        // check result (CUBLAS)
-        bool resCUBLAS = sdkCompareL2fe(h_C2, h_C, size_C, 1.0e-10f);
-
-        if (resCUBLAS != true)
-        {
-            printDiff(h_C2, h_C, matrix_size.uiWC, matrix_size.uiHC, 100, 1.0e-5f);\
-	    fail_count++;
-        }
-
-        printf("Comparing CUBLAS Matrix Multiply with CPU results: %s\n", (true == resCUBLAS) ? "PASS" : "FAIL");
-
+        nvmlDeviceResetGpuLockedClocks(device);
     }
-	printf("total test: %d, failed: %d.\n", nIter, fail_count);
-	printf("failure rate: %f.\n", (float)fail_count/nIter);
-	printf("average perf: %.2f.\n", total_perf/nIter);
+	// printf("total test: %d, failed: %d.\n", nIter, fail_count);
+	// printf("failure rate: %f.\n", (double)fail_count/nIter);
+	// printf("average perf: %.2f.\n", total_perf/nIter);
         // printf("done.\n");
 
         // // Record the stop event
@@ -376,11 +487,11 @@ int matrixMultiply()
         // // Wait for the stop event to complete
         // checkCudaErrors(cudaEventSynchronize(stop));
 
-        // float msecTotal = 0.0f;
+        // double msecTotal = 0.0f;
         // checkCudaErrors(cudaEventElapsedTime(&msecTotal, start, stop));
 
         // // Compute and print the performance
-        // float msecPerMatrixMul = msecTotal / nIter;
+        // double msecPerMatrixMul = msecTotal / nIter;
         // double flopsPerMatrixMul = 2.0 * (double)matrix_size.uiHC * (double)matrix_size.uiWC * (double)matrix_size.uiHB;
         // double gigaFlops = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul / 1000.0f);
         // printf(
@@ -402,6 +513,8 @@ int matrixMultiply()
     //printf("\nNOTE: The CUDA Samples are not meant for performance measurements. Results may vary when GPU Boost is enabled.\n");
 
     // clean up memory
+
+    //stop_measure_cpu(measure_cpu_pid);
     free(h_A);
     free(h_B);
     free(h_C);
@@ -409,7 +522,9 @@ int matrixMultiply()
     checkCudaErrors(cudaFree(d_A));
     checkCudaErrors(cudaFree(d_B));
     checkCudaErrors(cudaFree(d_C));
-    checkCudaErrors(cudaFree(d_C2));
+    undervolte(device, 1500, 338000);
+    change_offset(0);
+    //checkCudaErrors(cudaFree(d_C2));
 
     // if (resCUBLAS == true)
     // {
@@ -429,15 +544,23 @@ int matrixMultiply()
 ////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char **argv)
 {
-    printf("[Matrix Multiply CUBLAS] - Starting...\n");
-
+    
     int devID = 0, sizeMult = 5;
     sMatrixSize matrix_size;
 
 
-    
 
-    int matrix_result = matrixMultiply();
+    // matrixMultiply<double>(30720);
+    // matrixMultiply<double>(25600);
+    // matrixMultiply<double>(20480);
+    // matrixMultiply<double>(15360);
+    // matrixMultiply<double>(10240);
+    // matrixMultiply<double>(5120);
+
+    for (int n = 40960; n <= 40960; n+=5120) {
+        printf("[Matrix Multiply CUBLAS %d] - Starting...\n", n);
+        matrixMultiply<float>(n);
+    }
     //resetvolte();
-    return matrix_result;
+    return 0;
 }
